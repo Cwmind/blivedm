@@ -1,9 +1,11 @@
 import time
+import os
 import asyncio
 import http.cookies
 import random
 from typing import Optional, List
 import sys
+from datetime import datetime
 
 import aiohttp
 import yarl
@@ -12,7 +14,7 @@ import blivedm
 import blivedm.models.web as web_models
 
 # 配置区域
-TEST_ROOM_IDS: List[int] = [32362442,26518898,1709466518,6]  # 直播间ID
+TEST_ROOM_IDS: List[int] = [1880058296, 32362442, 26518898, 1709466518, 6]  # 直播间ID
 COOKIES = {
     "SESSDATA": "95ed59e5%2C1772958316%2C2c8ff%2A92CjCGhBSDLUWlm_9cJLO6KmB1pWorHd4yAuREIHm619Kg-W_-zO_PrxsZ8So8rp4t2gcSVjFCbnprc2xOUEN0RGhEVXVUaDR2c0tUZUpHYlAyejJSUGplcUh0WmJSZmdhZkZ6OEVTM25POGp6ZXBnNnBWdVNGLWZuOEFOdDVOcV9JU1VqMmVRWkl3IIEC",
     "bili_jct": "d281974263ab04becba12b3600218711"
@@ -22,13 +24,36 @@ session: Optional[aiohttp.ClientSession] = None
 is_running = True  # 控制程序运行的标志
 
 
+def init_message_folder():
+    """初始化消息存储文件夹"""
+    if not os.path.exists('massage'):
+        os.makedirs('massage')
+        print("已创建消息存储文件夹: massage")
+
+
+def write_to_file(room_id, content):
+    """将内容写入对应的日志文件"""
+    # 获取当前日期，格式如：20250910
+    current_date = datetime.now().strftime('%Y%m%d')
+    # 构建文件名：房间号-日期.txt
+    filename = f"{room_id}-{current_date}.txt"
+    # 构建完整路径
+    file_path = os.path.join('massage', filename)
+
+    # 写入文件（追加模式，UTF-8编码）
+    with open(file_path, 'a', encoding='utf-8') as f:
+        f.write(content + '\n')
+
+
 async def main():
     global is_running
     init_session()
+    init_message_folder()  # 初始化消息文件夹
+
     try:
         room_id = TEST_ROOM_IDS[0]
         client = blivedm.BLiveClient(room_id, session=session)
-        handler = MyHandler()
+        handler = MyHandler(room_id)  # 传入房间号用于文件命名
         client.set_handler(handler)
         client.start()
         print(f"已连接直播间 {room_id}，开始持续监听弹幕...")
@@ -89,7 +114,7 @@ async def send_loop(room_id: int):
 
             # 发送弹幕
             await send_danmaku(room_id, msg.strip())
-            # 发送后延迟0.5秒（等待监听打印完发送的弹幕）
+            # 发送后延迟1.5秒（等待监听打印完发送的弹幕）
             await asyncio.sleep(1.5)
 
         except Exception as e:
@@ -166,21 +191,37 @@ async def send_danmaku(room_id: int, msg: str):
 
 
 class MyHandler(blivedm.BaseHandler):
-    """持续监听弹幕：只打印消息，不输出未知命令日志"""
+    """持续监听弹幕：只打印消息，不输出未知命令日志，新增写入文件功能"""
+
+    def __init__(self, room_id):
+        super().__init__()
+        self.room_id = room_id  # 保存房间号用于文件命名
 
     def _on_danmaku(self, client: blivedm.BLiveClient, message: web_models.DanmakuMessage):
-        print(f"\n[{time.strftime('%H:%M:%S')}] {message.uname}：{message.msg}")
+        log_time = time.strftime('%H:%M:%S')
+        content = f"[{log_time}] {message.uname}：{message.msg}"
+        print(f"\n{content}")
+        # 写入文件
+        write_to_file(self.room_id, content)
 
     def _on_gift(self, client: blivedm.BLiveClient, message: web_models.GiftMessage):
-        print(f"\n[{time.strftime('%H:%M:%S')}] {message.uname} 赠送 {message.gift_name} x{message.num}")
+        log_time = time.strftime('%H:%M:%S')
+        content = f"[{log_time}] {message.uname} 赠送 {message.gift_name} x{message.num}"
+        print(f"\n{content}")
+        # 写入文件
+        write_to_file(self.room_id, content)
 
     def _on_super_chat(self, client: blivedm.BLiveClient, message: web_models.SuperChatMessage):
-        print(f"\n[{time.strftime('%H:%M:%S')}] 💰 {message.uname}（¥{message.price}）：{message.message}")
+        log_time = time.strftime('%H:%M:%S')
+        content = f"[{log_time}] 💰 {message.uname}（¥{message.price}）：{message.message}"
+        print(f"\n{content}")
+        # 写入文件
+        write_to_file(self.room_id, content)
 
-    # 关键修正：确保该方法正确缩进，属于MyHandler类
     def _on_unknown_command(self, client: blivedm.BLiveClient, cmd: str, command: dict):
         # 覆盖父类方法，不输出任何内容
         pass
+
 
 if __name__ == '__main__':
     try:
